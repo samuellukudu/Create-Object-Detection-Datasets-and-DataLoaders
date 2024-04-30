@@ -1,0 +1,404 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "37f5a6b6",
+   "metadata": {
+    "_cell_guid": "b1076dfc-b9ad-4769-8c92-a6c4dae69d19",
+    "_uuid": "8f2839f25d086af736a60e9eeb907d3b93b6e0e5",
+    "papermill": {
+     "duration": 0.004923,
+     "end_time": "2024-04-30T09:11:05.520909",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:05.515986",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "# Create yolo dataset\n",
+    "\n",
+    "## Part 1: Based on xml annotations"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "58a82c53",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:05.533223Z",
+     "iopub.status.busy": "2024-04-30T09:11:05.532206Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.642971Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.641436Z"
+    },
+    "papermill": {
+     "duration": 3.123113,
+     "end_time": "2024-04-30T09:11:08.648794",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:05.525681",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import os, gc, sys, yaml, shutil\n",
+    "from pathlib import Path\n",
+    "from tqdm.auto import tqdm\n",
+    "\n",
+    "import math\n",
+    "import random\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "from sklearn import model_selection\n",
+    "\n",
+    "import PIL\n",
+    "import cv2\n",
+    "\n",
+    "import xml\n",
+    "import xml.etree.ElementTree as ET\n",
+    "from xml.dom import minidom\n",
+    "\n",
+    "random.seed(42)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "18cd27a1",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.660331Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.659634Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.673677Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.672140Z"
+    },
+    "papermill": {
+     "duration": 0.023,
+     "end_time": "2024-04-30T09:11:08.676432",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.653432",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "['annotations', 'images']"
+      ]
+     },
+     "execution_count": 2,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "DATA_PATH = Path(\"/kaggle/input/road-sign-detection\")\n",
+    "os.listdir(DATA_PATH)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "63411a62",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.688351Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.687847Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.693830Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.692412Z"
+    },
+    "papermill": {
+     "duration": 0.015431,
+     "end_time": "2024-04-30T09:11:08.696626",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.681195",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# !cat /kaggle/input/road-sign-detection/annotations/road4.xml"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "e7cb3d65",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.709298Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.707890Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.718646Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.717501Z"
+    },
+    "papermill": {
+     "duration": 0.020245,
+     "end_time": "2024-04-30T09:11:08.721595",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.701350",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# function to get the data from XML annotation\n",
+    "def extract_info_from_xml(xml_file):\n",
+    "    root = ET.parse(xml_file).getroot()\n",
+    "    \n",
+    "    # initialize the info dict\n",
+    "    info_dict = {}\n",
+    "    info_dict['bboxes'] = []\n",
+    "    \n",
+    "    # parse the xml tree\n",
+    "    for elem in root:\n",
+    "        # get file name\n",
+    "        if elem.tag == \"filename\":\n",
+    "            info_dict['filename'] = elem.text\n",
+    "        \n",
+    "        # get the image size\n",
+    "        elif elem.tag == \"size\":\n",
+    "            image_size = []\n",
+    "            for subelem in elem:\n",
+    "                image_size.append(int(subelem.text))\n",
+    "                \n",
+    "            info_dict['image_size'] = tuple(image_size)\n",
+    "            \n",
+    "        # get details of the bounding box\n",
+    "        elif elem.tag == \"object\":\n",
+    "            bbox = {}\n",
+    "            for subelem in elem:\n",
+    "                if subelem.tag == \"name\":\n",
+    "                    bbox[\"class\"] = subelem.text\n",
+    "                elif subelem.tag == \"bndbox\":\n",
+    "                    for subsubelem in subelem:\n",
+    "                        bbox[subsubelem.tag] = int(subsubelem.text)\n",
+    "            info_dict['bboxes'].append(bbox)\n",
+    "            \n",
+    "    return info_dict"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "b49918de",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.733641Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.733136Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.747323Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.745913Z"
+    },
+    "papermill": {
+     "duration": 0.023955,
+     "end_time": "2024-04-30T09:11:08.750331",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.726376",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "{'bboxes': [{'class': 'trafficlight',\n",
+       "   'xmin': 98,\n",
+       "   'ymin': 62,\n",
+       "   'xmax': 208,\n",
+       "   'ymax': 232}],\n",
+       " 'filename': 'road0.png',\n",
+       " 'image_size': (267, 400, 3)}"
+      ]
+     },
+     "execution_count": 5,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "ANNOTATION_DIR = Path(\"/kaggle/input/road-sign-detection/annotations\")\n",
+    "info_dict = extract_info_from_xml(ANNOTATION_DIR/\"road0.xml\")\n",
+    "info_dict"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "6ec56a00",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.762924Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.762013Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.768184Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.767128Z"
+    },
+    "papermill": {
+     "duration": 0.01538,
+     "end_time": "2024-04-30T09:11:08.770654",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.755274",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# convert the information contain in info_dict to Yolo format\n",
+    "# dictionary that maps class names to IDs\n",
+    "class_name_to_id_mapping = {\n",
+    "    \"trafficlight\": 0,\n",
+    "    \"stop\": 1,\n",
+    "    \"speedlimit\": 2,\n",
+    "    \"crosswalk\": 3\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "8d37df40",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.782841Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.782078Z",
+     "iopub.status.idle": "2024-04-30T09:11:08.789461Z",
+     "shell.execute_reply": "2024-04-30T09:11:08.788226Z"
+    },
+    "papermill": {
+     "duration": 0.01657,
+     "end_time": "2024-04-30T09:11:08.792121",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.775551",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "0"
+      ]
+     },
+     "execution_count": 7,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "for box in info_dict['bboxes']:\n",
+    "    id_ = class_name_to_id_mapping[box['class']]\n",
+    "id_"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "f99b7351",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-04-30T09:11:08.804559Z",
+     "iopub.status.busy": "2024-04-30T09:11:08.803840Z",
+     "iopub.status.idle": "2024-04-30T09:11:09.159548Z",
+     "shell.execute_reply": "2024-04-30T09:11:09.158259Z"
+    },
+    "papermill": {
+     "duration": 0.365206,
+     "end_time": "2024-04-30T09:11:09.162413",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:08.797207",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "(877, 877)"
+      ]
+     },
+     "execution_count": 8,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "len(os.listdir(\"/kaggle/input/road-sign-detection/annotations\")), len(os.listdir(\"/kaggle/input/road-sign-detection/images\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "292336dd",
+   "metadata": {
+    "papermill": {
+     "duration": 0.00513,
+     "end_time": "2024-04-30T09:11:09.172670",
+     "exception": false,
+     "start_time": "2024-04-30T09:11:09.167540",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kaggle": {
+   "accelerator": "none",
+   "dataSources": [
+    {
+     "datasetId": 671172,
+     "sourceId": 1181356,
+     "sourceType": "datasetVersion"
+    }
+   ],
+   "dockerImageVersionId": 30698,
+   "isGpuEnabled": false,
+   "isInternetEnabled": true,
+   "language": "python",
+   "sourceType": "notebook"
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.10.13"
+  },
+  "papermill": {
+   "default_parameters": {},
+   "duration": 7.720902,
+   "end_time": "2024-04-30T09:11:09.900931",
+   "environment_variables": {},
+   "exception": null,
+   "input_path": "__notebook__.ipynb",
+   "output_path": "__notebook__.ipynb",
+   "parameters": {},
+   "start_time": "2024-04-30T09:11:02.180029",
+   "version": "2.5.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
